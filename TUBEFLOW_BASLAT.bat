@@ -22,7 +22,7 @@ if %errorlevel% neq 0 (
     echo Lutfen asagidaki adresten Node.js LTS surumunu indirip kurun:
     echo https://nodejs.org/
     echo.
-    echo Kurulum bittikten sonra bu pencereyi kapatip, bu dosyayi (.bat) tekrar calistirin.
+    echo Kurulum bittikten sonra bu pencereyi kapatip, bu dosyayi tekrar calistirin.
     pause
     exit
 )
