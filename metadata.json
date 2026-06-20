@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Remix: YouTube Canlı Yayın Otomasyonu 2",
+  "description": "YouTube kanallarında belirlenen video veya videoların otomatik olarak canlı yayınlanmasını ve zamanlanmasını sağlayan, bilgisayar kapalıyken bile çalışan web tabanlı otomasyon aracı.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
