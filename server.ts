@@ -2188,14 +2188,29 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(3000, '0.0.0.0', () => {
-    console.log('--- YouTube Livestream Scheduler Server is active ---');
-    console.log('Local Access Address: http://localhost:3000');
-    // Delay slightly to let the system settle and FFmpeg bootstrap checks complete
-    setTimeout(() => {
-      recoverActiveStreams();
-    }, 2000);
-  });
+  let port = parseInt(process.env.PORT || '3000');
+
+  function listen(portToTry: number) {
+    const server = app.listen(portToTry, '0.0.0.0', () => {
+      console.log('--- YouTube Livestream Scheduler Server is active ---');
+      console.log(`Local Access Address: http://localhost:${portToTry}`);
+      // Delay slightly to let the system settle and FFmpeg bootstrap checks complete
+      setTimeout(() => {
+        recoverActiveStreams();
+      }, 2000);
+    });
+
+    server.on('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        console.log(`⚠️ Port ${portToTry} is in use, trying port ${portToTry + 1}...`);
+        listen(portToTry + 1);
+      } else {
+        console.error('Server error:', err);
+      }
+    });
+  }
+
+  listen(port);
 }
 
 startServer();
