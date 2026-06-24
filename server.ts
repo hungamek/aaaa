@@ -183,6 +183,8 @@ interface Schedule {
   geminiBotEnabled?: boolean;
   geminiBotPrompt?: string;
   geminiBotTtsEnabled?: boolean;
+  windowAudioMode?: 'silent' | 'system' | 'cable' | 'custom';
+  windowAudioDevice?: string;
 }
 
 // Active streams in-memory registry
@@ -409,8 +411,22 @@ function startStreamProcess(schedule: Schedule, isLoopRestart = false) {
     // Windows GDIgrab allows capturing window with title or desktop
     const grabInput = (videoInput === 'desktop' || videoInput === '__desktop__') ? 'desktop' : `title=${videoInput}`;
     args.push('-f', 'gdigrab', '-framerate', '30', '-thread_queue_size', '1024', '-i', grabInput);
-    // Generate silent background stereo audio so YouTube does not complain/disconnect
-    args.push('-f', 'lavfi', '-thread_queue_size', '1024', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+    
+    // Choose appropriate audio capture method based on user preferences
+    const audioMode = schedule.windowAudioMode || 'silent';
+    if (audioMode === 'system') {
+      // Capture default system playback loopback via WASAPI
+      args.push('-f', 'wasapi', '-thread_queue_size', '1024', '-i', 'default');
+    } else if (audioMode === 'cable') {
+      // Capture exclusively from VB-Cable Output via DirectShow
+      args.push('-f', 'dshow', '-thread_queue_size', '1024', '-i', 'audio=CABLE Output (VB-Audio Virtual Cable)');
+    } else if (audioMode === 'custom' && schedule.windowAudioDevice) {
+      // Capture from custom specified audio device via DirectShow
+      args.push('-f', 'dshow', '-thread_queue_size', '1024', '-i', `audio=${schedule.windowAudioDevice}`);
+    } else {
+      // Generate silent background stereo audio so YouTube does not complain/disconnect
+      args.push('-f', 'lavfi', '-thread_queue_size', '1024', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+    }
   } else {
     // Correctly place loop option BEFORE input parameter to let demuxer loop seamlessly
     if (schedule.loop) {

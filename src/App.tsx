@@ -73,6 +73,8 @@ interface Schedule {
   geminiBotEnabled?: boolean;
   geminiBotPrompt?: string;
   geminiBotTtsEnabled?: boolean;
+  windowAudioMode?: 'silent' | 'system' | 'cable' | 'custom';
+  windowAudioDevice?: string;
 }
 
 // Safe LocalStorage helpers to prevent sandbox/cross-origin iframe crashes
@@ -653,6 +655,8 @@ export default function App() {
   const [availableWindows, setAvailableWindows] = useState<string[]>([]);
   const [selectedWindowTitle, setSelectedWindowTitle] = useState('');
   const [isLoadingWindows, setIsLoadingWindows] = useState(false);
+  const [windowAudioMode, setWindowAudioMode] = useState<'silent' | 'system' | 'cable' | 'custom'>('silent');
+  const [windowAudioDevice, setWindowAudioDevice] = useState('CABLE Output (VB-Audio Virtual Cable)');
 
   const fetchWindows = async () => {
     setIsLoadingWindows(true);
@@ -1222,7 +1226,9 @@ export default function App() {
           youtubeLiveUrl: youtubeLiveUrl.trim() || undefined,
           geminiBotEnabled: geminiBotEnabled,
           geminiBotPrompt: geminiBotPrompt,
-          geminiBotTtsEnabled: geminiBotTtsEnabled
+          geminiBotTtsEnabled: geminiBotTtsEnabled,
+          windowAudioMode: windowAudioMode,
+          windowAudioDevice: windowAudioDevice
         })
       });
 
@@ -2128,6 +2134,91 @@ export default function App() {
                         </p>
                       </div>
                     )}
+
+                    {/* 🎮 Window Audio Isolation Section */}
+                    <div className="pt-2.5 border-t border-zinc-900 space-y-2">
+                      <label className="block text-[8px] uppercase font-bold tracking-wider text-zinc-550 mb-0.5">🎮 SES YAKALAMA MODU (AUDIO ROUTING)</label>
+                      
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setWindowAudioMode('silent')}
+                          className={`p-2 rounded text-[10px] font-bold text-left flex items-center gap-1.5 transition ${
+                            windowAudioMode === 'silent'
+                              ? 'bg-zinc-900 text-white border border-zinc-750'
+                              : 'bg-black/60 text-zinc-500 hover:text-zinc-350 border border-transparent'
+                          }`}
+                        >
+                          <span>🔇 Sessiz</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWindowAudioMode('system')}
+                          className={`p-2 rounded text-[10px] font-bold text-left flex items-center gap-1.5 transition ${
+                            windowAudioMode === 'system'
+                              ? 'bg-zinc-900 text-white border border-zinc-750'
+                              : 'bg-black/60 text-zinc-500 hover:text-zinc-350 border border-transparent'
+                          }`}
+                        >
+                          <span>🔊 Tüm Sistem Sesi</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWindowAudioMode('cable')}
+                          className={`p-2 rounded text-[10px] font-bold text-left flex items-center gap-1.5 transition ${
+                            windowAudioMode === 'cable'
+                              ? 'bg-zinc-900 text-white border border-zinc-750'
+                              : 'bg-black/60 text-zinc-500 hover:text-zinc-350 border border-transparent'
+                          }`}
+                        >
+                          <span>🔌 Oyun Sesi (VB-Cable)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWindowAudioMode('custom')}
+                          className={`p-2 rounded text-[10px] font-bold text-left flex items-center gap-1.5 transition ${
+                            windowAudioMode === 'custom'
+                              ? 'bg-zinc-900 text-white border border-zinc-750'
+                              : 'bg-black/60 text-zinc-500 hover:text-zinc-350 border border-transparent'
+                          }`}
+                        >
+                          <span>🛠️ Özel Giriş Cihazı</span>
+                        </button>
+                      </div>
+
+                      {windowAudioMode === 'system' && (
+                        <p className="text-[9.5px] text-zinc-400 normal-case leading-relaxed">
+                          Sisteminizdeki tüm sesleri (Discord, YouTube, oyun sesleri vb.) doğrudan mikrofona/yayına loopback olarak verir.
+                        </p>
+                      )}
+
+                      {windowAudioMode === 'cable' && (
+                        <div className="bg-emerald-950/20 border border-emerald-900/30 p-2.5 rounded text-[9.5px] text-zinc-400 space-y-1 leading-relaxed">
+                          <strong className="text-emerald-400 block mb-0.5 font-bold uppercase tracking-wider">🔒 YALNIZCA OYUN SESİ İZOLASYONU (ÖNERİLEN!)</strong>
+                          <p className="normal-case">
+                            Sadece oyunun/uygulamanın sesini yayına vermek ve bilgisayarınızdaki diğer sesleri (Discord, bildirimler) gizlemek için en profesyonel yöntem:
+                          </p>
+                          <ol className="list-decimal list-inside normal-case space-y-0.5 text-zinc-300">
+                            <li><strong className="text-white">VB-Audio Virtual Cable</strong> yazılımını bilgisayarınıza kurun.</li>
+                            <li>Windows Ses Ayarlarından oyunun (örn: GTA V) çıkışını <strong className="text-white">CABLE Input</strong> yapın.</li>
+                            <li>Bu mod, oyun sesini <strong className="text-white">CABLE Output</strong> üzerinden yakalayarak yayına kesintisiz aktarır.</li>
+                          </ol>
+                        </div>
+                      )}
+
+                      {windowAudioMode === 'custom' && (
+                        <div className="space-y-1.5">
+                          <label className="block text-[8px] uppercase font-bold tracking-wider text-zinc-550">ÖZEL SES GİRİŞ CİHAZI ADI</label>
+                          <input
+                            type="text"
+                            value={windowAudioDevice}
+                            onChange={(e) => setWindowAudioDevice(e.target.value)}
+                            placeholder="Cihazın tam adını girin (Örn: Mikrofon)"
+                            className="w-full text-xs font-mono bg-black border border-zinc-700 p-2.5 text-emerald-400 focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
