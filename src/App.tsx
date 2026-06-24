@@ -52,7 +52,7 @@ interface Schedule {
   id: string;
   channelId?: string; // 'kanal1' | 'kanal2' | 'kanal3' | 'kanal4'
   title: string;
-  videoType: 'local' | 'url';
+  videoType: 'local' | 'url' | 'window';
   videoSource: string;
   videoTitle: string;
   scheduledTime: string;
@@ -70,6 +70,9 @@ interface Schedule {
   createdAt: string;
   actualStartTime?: string;
   actualEndTime?: string;
+  geminiBotEnabled?: boolean;
+  geminiBotPrompt?: string;
+  geminiBotTtsEnabled?: boolean;
 }
 
 // Safe LocalStorage helpers to prevent sandbox/cross-origin iframe crashes
@@ -639,6 +642,43 @@ export default function App() {
   // Form states
   const [schedTitle, setSchedTitle] = useState('');
   const [selectedVideoId, setSelectedVideoId] = useState('');
+  const [geminiBotEnabled, setGeminiBotEnabled] = useState(false);
+  const [geminiBotPrompt, setGeminiBotPrompt] = useState('Sohbette sorulan soruları cana yakın, samimi ve Türkçe olarak cevapla. Kanal ismimiz TubeFlow Auto. İzleyicileri yayını beğenmeye ve abone olmaya davet et.');
+  const [geminiBotTtsEnabled, setGeminiBotTtsEnabled] = useState(false);
+  
+  // 🖥️ Window Capture States
+  const [mediaSelectionType, setMediaSelectionType] = useState<'library' | 'window'>('library');
+  const [windowCaptureMode, setWindowCaptureMode] = useState<'desktop' | 'list' | 'manual'>('desktop');
+  const [customWindowTitle, setCustomWindowTitle] = useState('');
+  const [availableWindows, setAvailableWindows] = useState<string[]>([]);
+  const [selectedWindowTitle, setSelectedWindowTitle] = useState('');
+  const [isLoadingWindows, setIsLoadingWindows] = useState(false);
+
+  const fetchWindows = async () => {
+    setIsLoadingWindows(true);
+    try {
+      const res = await fetch('/api/windows');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.windows) {
+          setAvailableWindows(data.windows);
+          if (data.windows.length > 0) {
+            setSelectedWindowTitle(data.windows[0]);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch window list:', e);
+    } finally {
+      setIsLoadingWindows(false);
+    }
+  };
+
+  useEffect(() => {
+    if (mediaSelectionType === 'window') {
+      fetchWindows();
+    }
+  }, [mediaSelectionType]);
   
   useEffect(() => {
     selectedVideoIdRef.current = selectedVideoId;
@@ -817,6 +857,20 @@ export default function App() {
   const [editShortsMode, setEditShortsMode] = useState(false);
   const [editDualStream, setEditDualStream] = useState(false);
   const [editChannelId, setEditChannelId] = useState<'kanal1' | 'kanal2' | 'kanal3' | 'kanal4'>('kanal1');
+  const [editGeminiBotEnabled, setEditGeminiBotEnabled] = useState(false);
+  const [editGeminiBotPrompt, setEditGeminiBotPrompt] = useState('');
+  const [editGeminiBotTtsEnabled, setEditGeminiBotTtsEnabled] = useState(false);
+
+  // Gemini active replies state
+  const [consoleTab, setConsoleTab] = useState<'ffmpeg' | 'gemini_bot'>('ffmpeg');
+  const [botReplies, setBotReplies] = useState<Array<{
+    id: string;
+    author: string;
+    userMessage: string;
+    botResponse: string;
+    timestamp: number;
+    ttsSpoken: boolean;
+  }>>([]);
 
   // UI state monitors
   const [loading, setLoading] = useState(true);
@@ -959,6 +1013,58 @@ export default function App() {
     };
   }, [inspectScheduleId, schedules]);
 
+  // Fetch Gemini bot replies when active stream is inspected
+  useEffect(() => {
+    if (!inspectScheduleId) {
+      setBotReplies([]);
+      return;
+    }
+
+    let active = true;
+    const fetchBotReplies = async () => {
+      try {
+        const res = await fetch(`/api/schedules/${inspectScheduleId}/bot-replies`);
+        if (res.ok && active) {
+          const data = await res.json();
+          if (data.success && data.replies) {
+            setBotReplies(data.replies);
+
+            // Audio speech synthesis for any un-spoken bot replies if TTS is active
+            const inspectedSchedule = schedules.find(s => s.id === inspectScheduleId);
+            const isTtsActiveForBot = inspectedSchedule?.geminiBotTtsEnabled;
+
+            if (isTtsActiveForBot && 'speechSynthesis' in window) {
+              for (const reply of data.replies) {
+                if (!reply.ttsSpoken) {
+                  // Mark as spoken on server immediately so other client instances/polls don't repeat-play
+                  await fetch(`/api/schedules/${inspectScheduleId}/bot-replies/${reply.id}/speak`, { method: 'POST' });
+                  
+                  // Speak the message!
+                  const speakText = `${reply.author} sohbete yazdı: "${reply.userMessage}". Cevap: ${reply.botResponse}`;
+                  const utterance = new SpeechSynthesisUtterance(speakText);
+                  if (selectedTtsVoiceIndex >= 0 && availableVoices[selectedTtsVoiceIndex]) {
+                    utterance.voice = availableVoices[selectedTtsVoiceIndex];
+                  }
+                  utterance.lang = utterance.voice?.lang || 'tr-TR';
+                  window.speechSynthesis.speak(utterance);
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Bot replies poller error:', err);
+      }
+    };
+
+    fetchBotReplies();
+    const interval = setInterval(fetchBotReplies, 5000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [inspectScheduleId, schedules, selectedTtsVoiceIndex, availableVoices]);
+
   // Keep logs view scrolled to bottom
   useEffect(() => {
     if (logsAutoScroll && logsEndRef.current) {
@@ -1001,10 +1107,6 @@ export default function App() {
     setLocalFormError('');
     if (!schedTitle.trim()) {
       setLocalFormError('Lütfen yayın için belirleyici bir başlık girin.');
-      return;
-    }
-    if (!selectedVideoId) {
-      setLocalFormError('Lütfen yayınlanacak video kütüphanesinden bir öğe seçin.');
       return;
     }
     if (startTimeType === 'scheduled' && !scheduledDateTime) {
@@ -1054,11 +1156,43 @@ export default function App() {
       }
     }
 
-    // Lookup selected video details
-    const video = videos.find(v => v.id === selectedVideoId);
-    if (!video) {
-      setLocalFormError('Seçilen video kütüphanede bulunamadı.');
-      return;
+    let videoType: 'local' | 'url' | 'window' = 'local';
+    let videoSource = '';
+    let videoTitle = '';
+
+    if (mediaSelectionType === 'window') {
+      videoType = 'window';
+      if (windowCaptureMode === 'desktop') {
+        videoSource = '__desktop__';
+        videoTitle = '🖥️ TÜM MASAÜSTÜ / EKRAN YAKALAMA';
+      } else if (windowCaptureMode === 'manual') {
+        if (!customWindowTitle.trim()) {
+          setLocalFormError('Lütfen yakalamak istediğiniz pencerenin tam başlığını girin.');
+          return;
+        }
+        videoSource = customWindowTitle.trim();
+        videoTitle = `🖥️ ÖZEL PENCERE: ${customWindowTitle.trim()}`;
+      } else {
+        if (!selectedWindowTitle) {
+          setLocalFormError('Lütfen yakalamak istediğiniz pencereyi seçin.');
+          return;
+        }
+        videoSource = selectedWindowTitle;
+        videoTitle = `🖥️ PENCERE: ${selectedWindowTitle}`;
+      }
+    } else {
+      if (!selectedVideoId) {
+        setLocalFormError('Lütfen yayınlanacak video kütüphanesinden bir öğe seçin.');
+        return;
+      }
+      const video = videos.find(v => v.id === selectedVideoId);
+      if (!video) {
+        setLocalFormError('Seçilen video kütüphanede bulunamadı.');
+        return;
+      }
+      videoType = video.type;
+      videoSource = video.source;
+      videoTitle = video.title;
     }
 
     try {
@@ -1074,9 +1208,9 @@ export default function App() {
         body: JSON.stringify({
           channelId: activeChannel,
           title: schedTitle,
-          videoType: video.type,
-          videoSource: video.source,
-          videoTitle: video.title,
+          videoType: videoType,
+          videoSource: videoSource,
+          videoTitle: videoTitle,
           scheduledTime: finalScheduledTime,
           scheduledEndTime: finalScheduledEndTime,
           streamKey: customStreamKey.trim(),
@@ -1085,7 +1219,10 @@ export default function App() {
           shortsMode: shortsMode,
           dualStream: dualStreamEnabled,
           proxyUrl: streamProxyUrl.trim() || undefined,
-          youtubeLiveUrl: youtubeLiveUrl.trim() || undefined
+          youtubeLiveUrl: youtubeLiveUrl.trim() || undefined,
+          geminiBotEnabled: geminiBotEnabled,
+          geminiBotPrompt: geminiBotPrompt,
+          geminiBotTtsEnabled: geminiBotTtsEnabled
         })
       });
 
@@ -1103,6 +1240,9 @@ export default function App() {
       setLoopEnabled(false);
       setShortsMode(false);
       setDualStreamEnabled(true);
+      setGeminiBotEnabled(false);
+      setGeminiBotPrompt('Sohbette sorulan soruları cana yakın, samimi ve Türkçe olarak cevapla. Kanal ismimiz TubeFlow Auto. İzleyicileri yayını beğenmeye ve abone olmaya davet et.');
+      setGeminiBotTtsEnabled(false);
       setLocalFormError('');
 
       if (startTimeType === 'immediate') {
@@ -1400,7 +1540,10 @@ export default function App() {
           shortsMode: editShortsMode,
           dualStream: editDualStream,
           proxyUrl: editProxyUrl.trim() || undefined,
-          youtubeLiveUrl: editYoutubeLiveUrl.trim() || undefined
+          youtubeLiveUrl: editYoutubeLiveUrl.trim() || undefined,
+          geminiBotEnabled: editGeminiBotEnabled,
+          geminiBotPrompt: editGeminiBotPrompt,
+          geminiBotTtsEnabled: editGeminiBotTtsEnabled
         })
       });
 
@@ -1441,6 +1584,9 @@ export default function App() {
     setEditProxyUrl(sched.proxyUrl || '');
     setEditYoutubeLiveUrl(sched.youtubeLiveUrl || '');
     setEditChannelId((sched.channelId || 'kanal1') as 'kanal1' | 'kanal2' | 'kanal3' | 'kanal4');
+    setEditGeminiBotEnabled(!!sched.geminiBotEnabled);
+    setEditGeminiBotPrompt(sched.geminiBotPrompt || 'Sohbette sorulan soruları cana yakın, samimi ve Türkçe olarak cevapla. Kanal ismimiz TubeFlow Auto. İzleyicileri yayını beğenmeye ve abone olmaya davet et.');
+    setEditGeminiBotTtsEnabled(!!sched.geminiBotTtsEnabled);
   };
 
   // Helper bytes converter
@@ -1824,23 +1970,165 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-zinc-500 mb-1">MEDYA SEÇİMİ</label>
-                {videos.length === 0 ? (
-                  <div className="text-xs text-zinc-600 p-3 bg-black border border-zinc-800 italic">
-                    Kütüphanenizde oynatılabilir video bulunmamaktadır. Sağ taraftan yeni dosyalar ekleyin.
-                  </div>
-                ) : (
-                  <select 
-                    value={selectedVideoId} 
-                    onChange={(e) => setSelectedVideoId(e.target.value)} 
-                    className="w-full text-xs bg-black border border-zinc-700 p-3 font-semibold text-white focus:outline-none focus:border-[#FF0000] tracking-wider uppercase"
+                <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-zinc-500 mb-1.5">MEDYA SEÇİMİ</label>
+                
+                {/* Selector Tab for Media Selection Type */}
+                <div className="grid grid-cols-2 bg-black border border-zinc-800 p-1 mb-2.5 rounded text-[10px] font-black uppercase tracking-wider">
+                  <button
+                    type="button"
+                    onClick={() => setMediaSelectionType('library')}
+                    className={`py-1.5 transition flex items-center justify-center gap-1 ${
+                      mediaSelectionType === 'library'
+                        ? 'bg-zinc-900 text-white font-bold border border-zinc-700'
+                        : 'text-zinc-550 hover:text-zinc-350'
+                    }`}
                   >
-                    {videos.map(v => (
-                      <option key={v.id} value={v.id} className="bg-black text-white">
-                        [{v.type === 'local' ? 'DOSYA' : 'LINK'}] {v.title}
-                      </option>
-                    ))}
-                  </select>
+                    🎞️ KÜTÜPHANE VİDEOSU
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMediaSelectionType('window')}
+                    className={`py-1.5 transition flex items-center justify-center gap-1 ${
+                      mediaSelectionType === 'window'
+                        ? 'bg-zinc-900 text-white font-bold border border-zinc-700'
+                        : 'text-zinc-550 hover:text-zinc-350'
+                    }`}
+                  >
+                    🖥️ PENCERE YAKALA
+                  </button>
+                </div>
+
+                {mediaSelectionType === 'library' ? (
+                  videos.length === 0 ? (
+                    <div className="text-xs text-zinc-600 p-3 bg-black border border-zinc-800 italic">
+                      Kütüphanenizde oynatılabilir video bulunmamaktadır. Sağ taraftan yeni dosyalar ekleyin.
+                    </div>
+                  ) : (
+                    <select 
+                      value={selectedVideoId} 
+                      onChange={(e) => setSelectedVideoId(e.target.value)} 
+                      className="w-full text-xs bg-black border border-zinc-700 p-3 font-semibold text-white focus:outline-none focus:border-[#FF0000] tracking-wider uppercase"
+                    >
+                      {videos.map(v => (
+                        <option key={v.id} value={v.id} className="bg-black text-white">
+                          [{v.type === 'local' ? 'DOSYA' : 'LINK'}] {v.title}
+                        </option>
+                      ))}
+                    </select>
+                  )
+                ) : (
+                  <div className="space-y-3 bg-zinc-950 p-3.5 border border-zinc-900 rounded text-left">
+                    {/* Information box explaining Cloud environment limitation */}
+                    <div className="bg-amber-950/40 border border-amber-900/50 p-3 rounded text-[10px] space-y-1.5 leading-relaxed text-amber-300">
+                      <div className="flex items-center gap-1.5 font-bold text-amber-400">
+                        <AlertCircle size={12} className="shrink-0" />
+                        <span>BULUT SUNUCU BİLGİLENDİRMESİ</span>
+                      </div>
+                      <p className="normal-case">
+                        Bu uygulama şu an <strong className="text-white">Google Cloud</strong> bulut sunucularında çalışmaktadır. Bulut sunucuları güvenlik sebebiyle sizin evinizdeki yerel bilgisayarınızda açık olan pencereleri (<strong className="text-white">GTA V, Chrome vb.</strong>) doğrudan algılayamaz.
+                      </p>
+                      <p className="normal-case text-zinc-400 font-medium">
+                        👉 <strong className="text-amber-400">Nasıl Kullanılır?</strong> Gerçek pencerelerinizi yakalamak için bu projeyi bilgisayarınıza indirip <strong className="text-white">yerel olarak (Localhost) çalıştırmanız</strong> gerekmektedir. Yerel modda PowerShell üzerinden tüm açık pencereleriniz otomatik olarak listelenecektir.
+                      </p>
+                    </div>
+
+                    {/* 3-way Window/Screen Sub-selector */}
+                    <div className="grid grid-cols-3 gap-1 bg-black p-0.5 border border-zinc-805 rounded text-[9px] font-bold uppercase tracking-wider text-center">
+                      <button
+                        type="button"
+                        onClick={() => setWindowCaptureMode('desktop')}
+                        className={`py-1 transition rounded ${
+                          windowCaptureMode === 'desktop'
+                            ? 'bg-zinc-900 text-white border border-zinc-700 font-extrabold'
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        🖥️ TÜM EKRAN
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWindowCaptureMode('list')}
+                        className={`py-1 transition rounded ${
+                          windowCaptureMode === 'list'
+                            ? 'bg-zinc-900 text-white border border-zinc-700 font-extrabold'
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        📋 PENCERE SEÇ
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWindowCaptureMode('manual')}
+                        className={`py-1 transition rounded ${
+                          windowCaptureMode === 'manual'
+                            ? 'bg-zinc-900 text-white border border-zinc-700 font-extrabold'
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        ✏️ PENCERE ADI
+                      </button>
+                    </div>
+
+                    {windowCaptureMode === 'desktop' && (
+                      <div className="text-center p-3 border border-dashed border-zinc-800 bg-black/40">
+                        <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest block mb-1">🖥️ TÜM EKRAN YAKALAMA AKTİF</span>
+                        <p className="text-[10px] text-zinc-400 normal-case leading-relaxed">
+                          Bilgisayarınızın tüm masaüstünü / ana ekranını anlık olarak yakalar ve canlı yayına verir. Başlat çubuğunda gizli olan veya görünmeyen tüm uygulama ve oyunları ekranınızda açarak yayınlayabilirsiniz.
+                        </p>
+                      </div>
+                    )}
+
+                    {windowCaptureMode === 'list' && (
+                      <div className="space-y-2">
+                        <label className="block text-[8px] uppercase font-bold tracking-wider text-zinc-550 mb-0.5">AÇIK PENCERELER LİSTESİ</label>
+                        <div className="flex gap-2">
+                          <select
+                            value={selectedWindowTitle}
+                            onChange={(e) => setSelectedWindowTitle(e.target.value)}
+                            disabled={isLoadingWindows || availableWindows.length === 0}
+                            className="flex-1 text-xs bg-black border border-zinc-700 p-2.5 font-semibold text-white focus:outline-none focus:border-[#FF0000] tracking-wider uppercase disabled:opacity-50"
+                          >
+                            {availableWindows.length === 0 ? (
+                              <option value="">AÇIK PENCERE BULUNAMADI</option>
+                            ) : (
+                              availableWindows.map(win => (
+                                <option key={win} value={win} className="bg-black text-white">
+                                  {win}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={fetchWindows}
+                            disabled={isLoadingWindows}
+                            className="px-3 bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800 transition text-[9px] font-bold uppercase disabled:opacity-50 flex items-center gap-1 shrink-0"
+                          >
+                            {isLoadingWindows ? '...' : 'YENİLE 🔄'}
+                          </button>
+                        </div>
+                        <p className="text-[9.5px] text-zinc-400 font-sans normal-case leading-relaxed">
+                          Yalnızca Windows işletim sisteminde çalışan ve başlığı (Title) olan aktif pencereleri listeler.
+                        </p>
+                      </div>
+                    )}
+
+                    {windowCaptureMode === 'manual' && (
+                      <div className="space-y-2">
+                        <label className="block text-[8px] uppercase font-bold tracking-wider text-zinc-550 mb-0.5">YAKALANACAK PENCERE BAŞLIĞI (TITLE)</label>
+                        <input
+                          type="text"
+                          value={customWindowTitle}
+                          onChange={(e) => setCustomWindowTitle(e.target.value)}
+                          placeholder="Örn: GTA V veya VLC Media Player"
+                          className="w-full text-xs font-mono bg-black border border-zinc-700 p-2.5 text-blue-400 placeholder-zinc-800 focus:outline-none focus:border-blue-500"
+                        />
+                        <p className="text-[9.5px] text-zinc-400 font-sans normal-case leading-relaxed">
+                          Başlat çubuğunda veya listede görünmeyen, ancak arka planda açık olan uygulamanızın pencere başlığını (Title) buraya tam olarak yazarak FFmpeg'e hedef gösterebilirsiniz.
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -2209,8 +2497,61 @@ export default function App() {
                   value={youtubeLiveUrl}
                   onChange={(e) => setYoutubeLiveUrl(e.target.value)}
                   placeholder="Örn: https://www.youtube.com/watch?v=R872vE7N_8U veya doğrudan Video ID"
-                  className="w-full text-xs font-mono bg-black border border-zinc-805 p-2.5 text-blue-400 placeholder-zinc-800 focus:outline-none focus:border-blue-500"
+                  className="w-full text-xs font-mono bg-black border border-zinc-850 p-2.5 text-blue-400 placeholder-zinc-800 focus:outline-none focus:border-blue-500"
                 />
+              </div>
+
+              {/* 🤖 GEMINI AI YAYIN SOHBET ROBOTU SEÇENEKLERİ */}
+              <div className="bg-[#0c140f] border border-emerald-950/60 p-4">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Sparkles className="w-4 h-4 text-emerald-400 animate-pulse" />
+                  <span className="text-[10px] font-black uppercase text-emerald-400 tracking-wider">🤖 GEMINI SOHBET Moderasyon ROBOTU (YAPAY ZEKA)</span>
+                </div>
+                <p className="text-[10.5px] text-zinc-400 normal-case leading-relaxed font-sans mb-3">
+                  Bu yayının YouTube canlı sohbet akışını anlık takip ederek, izleyicilerinizin yazdığı sorulara <strong className="text-white">Gemini Yapay Zeka motoru</strong> ile sizin yerinize otomatik, akıllı ve Türkçe cevaplar yazdırın.
+                </p>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="flex items-center gap-2.5 h-[44px] bg-black border border-zinc-850 px-3 rounded">
+                      <input 
+                        type="checkbox" 
+                        id="gemini_bot_enabled" 
+                        checked={geminiBotEnabled} 
+                        onChange={(e) => setGeminiBotEnabled(e.target.checked)} 
+                        className="border-zinc-700 text-emerald-500 focus:ring-0 w-4 h-4 bg-black cursor-pointer rounded-none"
+                      />
+                      <label htmlFor="gemini_bot_enabled" className="text-[10px] text-zinc-300 font-bold uppercase tracking-wider cursor-pointer select-none">
+                        Sohbet Robotu Aktif
+                      </label>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 h-[44px] bg-black border border-zinc-850 px-3 rounded">
+                      <input 
+                        type="checkbox" 
+                        id="gemini_bot_tts_enabled" 
+                        checked={geminiBotTtsEnabled} 
+                        disabled={!geminiBotEnabled}
+                        onChange={(e) => setGeminiBotTtsEnabled(e.target.checked)} 
+                        className="border-zinc-700 text-emerald-500 focus:ring-0 w-4 h-4 bg-black cursor-pointer rounded-none disabled:opacity-50"
+                      />
+                      <label htmlFor="gemini_bot_tts_enabled" className={`text-[10px] font-bold uppercase tracking-wider cursor-pointer select-none ${geminiBotEnabled ? 'text-zinc-300' : 'text-zinc-650'}`}>
+                        Cevapları Sesli Oku (TTS) 🎙️
+                      </label>
+                    </div>
+                  </div>
+
+                  {geminiBotEnabled && (
+                    <div>
+                      <label className="block text-[9px] uppercase font-bold tracking-[0.1em] text-zinc-500 mb-1">ROBOTUN YAPAY ZEKA TALİMATI / ROLLERİ (PROMPT)</label>
+                      <textarea
+                        value={geminiBotPrompt}
+                        onChange={(e) => setGeminiBotPrompt(e.target.value)}
+                        placeholder="Örn: Soruları samimi yanıtla, kanala abone olmaya davet et..."
+                        className="w-full text-xs font-mono bg-black border border-zinc-850 p-2.5 text-emerald-400 placeholder-zinc-800 focus:outline-none focus:border-emerald-500 min-h-[64px]"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
 
               <button 
@@ -2787,6 +3128,56 @@ export default function App() {
                             </label>
                           </div>
 
+                          {/* 🤖 GEMINI AI YAYIN SOHBET ROBOTU SEÇENEKLERİ (EDİT) */}
+                          <div className="bg-[#0c140f] border border-emerald-950/60 p-4 rounded text-left">
+                            <div className="flex items-center gap-1.5 mb-2">
+                              <Sparkles className="w-4 h-4 text-emerald-400 animate-pulse" />
+                              <span className="text-[10px] font-black uppercase text-emerald-400 tracking-wider">🤖 GEMINI SOHBET MODERASYON ROBOTU (EDİT)</span>
+                            </div>
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="flex items-center gap-2.5 h-[44px] bg-black border border-zinc-805 px-3 rounded">
+                                  <input 
+                                    type="checkbox" 
+                                    id="edit_gemini_bot_enabled" 
+                                    checked={editGeminiBotEnabled} 
+                                    onChange={(e) => setEditGeminiBotEnabled(e.target.checked)} 
+                                    className="border-zinc-700 text-emerald-500 focus:ring-0 w-4 h-4 bg-black cursor-pointer rounded-none"
+                                  />
+                                  <label htmlFor="edit_gemini_bot_enabled" className="text-[10px] text-zinc-300 font-bold uppercase tracking-wider cursor-pointer select-none">
+                                    Sohbet Robotu Aktif
+                                  </label>
+                                </div>
+
+                                <div className="flex items-center gap-2.5 h-[44px] bg-black border border-zinc-805 px-3 rounded">
+                                  <input 
+                                    type="checkbox" 
+                                    id="edit_gemini_bot_tts_enabled" 
+                                    checked={editGeminiBotTtsEnabled} 
+                                    disabled={!editGeminiBotEnabled}
+                                    onChange={(e) => setEditGeminiBotTtsEnabled(e.target.checked)} 
+                                    className="border-zinc-700 text-emerald-500 focus:ring-0 w-4 h-4 bg-black cursor-pointer rounded-none disabled:opacity-50"
+                                  />
+                                  <label htmlFor="edit_gemini_bot_tts_enabled" className={`text-[10px] font-bold uppercase tracking-wider cursor-pointer select-none ${editGeminiBotEnabled ? 'text-zinc-300' : 'text-zinc-650'}`}>
+                                    Cevapları Sesli Oku (TTS) 🎙️
+                      </label>
+                                </div>
+                              </div>
+
+                              {editGeminiBotEnabled && (
+                                <div>
+                                  <label className="block text-[9px] uppercase font-bold tracking-[0.1em] text-zinc-500 mb-1">ROBOTUN YAPAY ZEKA TALİMATI / ROLLERİ (PROMPT)</label>
+                                  <textarea
+                                    value={editGeminiBotPrompt}
+                                    onChange={(e) => setEditGeminiBotPrompt(e.target.value)}
+                                    placeholder="Örn: Soruları samimi yanıtla, kanala abone olmaya davet et..."
+                                    className="w-full text-xs font-mono bg-black border border-zinc-805 p-2 text-emerald-400 placeholder-zinc-800 focus:outline-none focus:border-emerald-500 min-h-[64px]"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
                           <div className="flex gap-2 justify-end pt-2">
                             <button 
                               onClick={() => setEditingScheduleId(null)}
@@ -3020,10 +3411,136 @@ export default function App() {
                     </div>
                   )}
 
-                  <div className="flex-1 bg-black border border-zinc-800 p-4 font-mono text-[11px] leading-relaxed text-zinc-400 overflow-y-auto max-h-[220px] h-full whitespace-pre-wrap select-text border-l-2 border-l-[#FF0000]">
-                    {activeLogs || '[BAĞLANTI BEKLENİYOR] Yayın parametreleri yükleniyor, FFmpeg sinyali bekleniyor...'}
-                    <div ref={logsEndRef} />
+                  {/* TAB SELECTORS */}
+                  <div className="flex border-b border-zinc-850 mb-2 font-mono">
+                    <button
+                      onClick={() => setConsoleTab('ffmpeg')}
+                      className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition leading-none ${
+                        consoleTab === 'ffmpeg'
+                          ? 'border-b-2 border-b-red-500 text-white bg-zinc-900/60'
+                          : 'text-zinc-500 hover:text-zinc-300 card-tab'
+                      }`}
+                    >
+                      📟 FFmpeg Konsol Logları
+                    </button>
+                    <button
+                      onClick={() => setConsoleTab('gemini_bot')}
+                      className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition flex items-center gap-1.5 leading-none ${
+                        consoleTab === 'gemini_bot'
+                          ? 'border-b-2 border-b-emerald-400 text-emerald-400 bg-zinc-900/60'
+                          : 'text-zinc-500 hover:text-zinc-300 card-tab'
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" /> 🤖 Gemini AI Bot Logları ({botReplies.length})
+                    </button>
                   </div>
+
+                  {consoleTab === 'ffmpeg' ? (
+                    <div className="flex-1 bg-black border border-zinc-850 p-4 font-mono text-[11px] leading-relaxed text-zinc-400 overflow-y-auto max-h-[240px] h-full whitespace-pre-wrap select-text border-l-2 border-l-[#FF0000]">
+                      {activeLogs || '[BAĞLANTI BEKLENİYOR] Yayın parametreleri yükleniyor, FFmpeg sinyali bekleniyor...'}
+                      <div ref={logsEndRef} />
+                    </div>
+                  ) : (
+                    <div className="flex-1 bg-black border border-zinc-850 p-4 overflow-y-auto max-h-[240px] h-full border-l-2 border-l-emerald-500 text-left">
+                      <div className="space-y-3">
+                        {/* Sandbox Manual Chat Entry */}
+                        <div className="bg-zinc-950 p-2.5 border border-zinc-900 flex flex-col gap-2">
+                          <span className="text-[9px] font-black uppercase text-emerald-400 tracking-wider flex items-center gap-1">
+                            <Sparkles className="w-3 h-3 text-emerald-400 animate-pulse" /> Sandbox Manuel Soruları Yapay Zekaya Cevaplat
+                          </span>
+                          <p className="text-[10px] text-zinc-500 normal-case leading-snug">
+                            Yayınınız canlı olmasa ya da YouTube'a bağlı olmasa da bu sandbox'ı kullanarak belirlediğiniz prompta göre Gemini'ın ne cevap üreteceğini anında test edebilirsiniz.
+                          </p>
+                          <form
+                            onSubmit={async (e) => {
+                              e.preventDefault();
+                              const form = e.currentTarget;
+                              const authorInput = form.elements.namedItem('testAuthor') as HTMLInputElement;
+                              const messageInput = form.elements.namedItem('testMessage') as HTMLInputElement;
+                              const author = authorInput.value.trim();
+                              const message = messageInput.value.trim();
+                              if (!author || !message) return;
+                              
+                              authorInput.value = '';
+                              messageInput.value = '';
+                              
+                              try {
+                                const response = await fetch(`/api/schedules/${inspectScheduleId}/bot-replies/generate-manual`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    author,
+                                    message,
+                                    botPersonality: inspectedSchedule?.geminiBotPrompt || ''
+                                  })
+                                });
+                                if (response.ok) {
+                                  const rData = await response.json();
+                                  if (rData.success && rData.reply) {
+                                    setBotReplies(prev => [rData.reply, ...prev]);
+                                  }
+                                }
+                              } catch (err) {
+                                console.error('Manuel bot reply error:', err);
+                              }
+                            }}
+                            className="flex flex-col sm:flex-row gap-2 mt-1"
+                          >
+                            <input 
+                              type="text" 
+                              name="testAuthor"
+                              placeholder="Seyirci Adı (Örn: BurakB)"
+                              className="text-[10px] font-mono bg-black border border-zinc-800 p-1.5 text-zinc-300 focus:outline-none focus:border-emerald-500 sm:w-1/3"
+                              required
+                            />
+                            <input 
+                              type="text" 
+                              name="testMessage"
+                              placeholder="Soru veya yorum..."
+                              className="text-[10px] font-mono bg-black border border-zinc-800 p-1.5 text-emerald-400 focus:outline-none focus:border-emerald-500 flex-1"
+                              required
+                            />
+                            <button
+                              type="submit"
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[9px] font-bold uppercase tracking-wider shrink-0"
+                            >
+                              YÜKLE & YANITLA
+                            </button>
+                          </form>
+                        </div>
+
+                        {botReplies.length > 0 ? (
+                          <div className="divide-y divide-zinc-900 border border-zinc-900 rounded overflow-hidden">
+                            {botReplies.map((reply) => (
+                              <div key={reply.id} className="p-3 bg-zinc-950 hover:bg-zinc-950/60 leading-normal flex flex-col gap-1.5">
+                                <div className="flex items-center justify-between text-[9px] font-sans text-zinc-500">
+                                  <div className="flex items-center gap-1">
+                                    <strong className="text-zinc-300 font-mono select-all text-[9.5px]">{reply.author}</strong>
+                                    <span>canlı yayında sordu:</span>
+                                  </div>
+                                  <span>{new Date(reply.timestamp).toLocaleTimeString('tr-TR')}</span>
+                                </div>
+                                <div className="text-[10.5px] font-mono text-zinc-400 pl-2 border-l-2 border-l-zinc-800">
+                                  "{reply.userMessage}"
+                                </div>
+                                <div className="flex items-start gap-1.5 bg-emerald-950/20 p-2.5 border border-emerald-900/30 text-[11px] leading-relaxed">
+                                  <Sparkles className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0 animate-pulse" />
+                                  <div className="text-emerald-300 font-sans select-text">
+                                    <strong className="text-emerald-400 uppercase tracking-wide text-[9px] font-bold block mb-0.5">Gemini Cevabı:</strong>
+                                    {reply.botResponse}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="py-12 border border-dashed border-zinc-800 text-center text-zinc-550 text-[10px] uppercase font-mono tracking-wider">
+                            Yayın Robotu Hazır 🤖. YouTube Canlı Sohbetinden veya manuel test girişinden veri bekleniyor...
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })() : (

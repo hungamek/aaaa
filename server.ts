@@ -162,7 +162,7 @@ interface Schedule {
   id: string;
   channelId?: string; // 'kanal1' | 'kanal2' | 'kanal3' | 'kanal4'
   title: string;
-  videoType: 'local' | 'url';
+  videoType: 'local' | 'url' | 'window';
   videoSource: string; // File name (local) or absolute URL
   videoTitle: string;  // Readable name
   scheduledTime: string; // ISO String
@@ -180,6 +180,9 @@ interface Schedule {
   createdAt: string;
   actualStartTime?: string;
   actualEndTime?: string;
+  geminiBotEnabled?: boolean;
+  geminiBotPrompt?: string;
+  geminiBotTtsEnabled?: boolean;
 }
 
 // Active streams in-memory registry
@@ -402,25 +405,33 @@ function startStreamProcess(schedule: Schedule, isLoopRestart = false) {
 
   const args: string[] = ['-y', '-nostdin'];
   
-  // Correctly place loop option BEFORE input parameter to let demuxer loop seamlessly
-  if (schedule.loop) {
-    args.push('-stream_loop', '-1');
+  if (schedule.videoType === 'window') {
+    // Windows GDIgrab allows capturing window with title or desktop
+    const grabInput = (videoInput === 'desktop' || videoInput === '__desktop__') ? 'desktop' : `title=${videoInput}`;
+    args.push('-f', 'gdigrab', '-framerate', '30', '-thread_queue_size', '1024', '-i', grabInput);
+    // Generate silent background stereo audio so YouTube does not complain/disconnect
+    args.push('-f', 'lavfi', '-thread_queue_size', '1024', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+  } else {
+    // Correctly place loop option BEFORE input parameter to let demuxer loop seamlessly
+    if (schedule.loop) {
+      args.push('-stream_loop', '-1');
+    }
+    
+    // High compatibility reconnect settings for internet stream inputs (URLs)
+    const isNetworkInput = schedule.videoType === 'url' || videoInput.startsWith('http://') || videoInput.startsWith('https://');
+    if (isNetworkInput) {
+      args.push('-reconnect', '1', '-reconnect_at_eof', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5');
+    }
+    
+    args.push('-thread_queue_size', '1024'); // Massively buffer input read thread to absorb system latency and spikes
+    args.push('-re'); // Read input at native frame rate
+    
+    // High compatibility options for continuous timestamping
+    args.push('-fflags', '+genpts');
+    args.push('-avoid_negative_ts', 'make_zero');
+    
+    args.push('-i', videoInput);
   }
-  
-  // High compatibility reconnect settings for internet stream inputs (URLs)
-  const isNetworkInput = schedule.videoType === 'url' || videoInput.startsWith('http://') || videoInput.startsWith('https://');
-  if (isNetworkInput) {
-    args.push('-reconnect', '1', '-reconnect_at_eof', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5');
-  }
-  
-  args.push('-thread_queue_size', '1024'); // Massively buffer input read thread to absorb system latency and spikes
-  args.push('-re'); // Read input at native frame rate
-  
-  // High compatibility options for continuous timestamping
-  args.push('-fflags', '+genpts');
-  args.push('-avoid_negative_ts', 'make_zero');
-  
-  args.push('-i', videoInput);
   
   // ALWAYS re-encode with high performance settings. Statically copying stream packets (-c:v copy) of random files
   // fails on RTMP outputs because of non-monotonic timestamps, keyframe gaps, and incompatible audio frequencies.
@@ -433,7 +444,11 @@ function startStreamProcess(schedule: Schedule, isLoopRestart = false) {
     
     // OUTPUT 1: Landscape Standard Feed (rtmp/rtmps://a.rtmp.youtube.com/live2)
     args.push('-map', '[vout_landscape]');
-    args.push('-map', '0:a?'); // Map input audio optionally
+    if (schedule.videoType === 'window') {
+      args.push('-map', '1:a');
+    } else {
+      args.push('-map', '0:a?'); // Map input audio optionally
+    }
     args.push('-c:v', 'libx264');
     args.push('-preset', 'ultrafast');
     args.push('-tune', 'zerolatency');
@@ -455,7 +470,11 @@ function startStreamProcess(schedule: Schedule, isLoopRestart = false) {
  
     // OUTPUT 2: Portrait Shorts Feed (rtmp/rtmps://b.rtmp.youtube.com/live2)
     args.push('-map', '[vout_portrait]');
-    args.push('-map', '0:a?'); // Map input audio optionally
+    if (schedule.videoType === 'window') {
+      args.push('-map', '1:a');
+    } else {
+      args.push('-map', '0:a?'); // Map input audio optionally
+    }
     args.push('-c:v', 'libx264');
     args.push('-preset', 'ultrafast');
     args.push('-tune', 'zerolatency');
@@ -477,6 +496,10 @@ function startStreamProcess(schedule: Schedule, isLoopRestart = false) {
   } else {
     const protocol = schedule.streamProtocol === 'rtmps' ? 'rtmps' : 'rtmp';
  
+    if (schedule.videoType === 'window') {
+      args.push('-map', '0:v');
+      args.push('-map', '1:a');
+    }
     args.push('-c:v', 'libx264');
     args.push('-preset', 'ultrafast');
     args.push('-tune', 'zerolatency');
@@ -1104,6 +1127,48 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// Windows Window List Endpoint
+app.get('/api/windows', (req, res) => {
+  if (process.platform !== 'win32') {
+    // Return sample/dummy windows for presentation/sandboxing on non-Windows dev platforms
+    return res.json({
+      success: true,
+      platform: process.platform,
+      windows: [
+        "VLC Media Player",
+        "GTA V",
+        "Google Chrome",
+        "Discord",
+        "Minecraft",
+        "Counter-Strike 2",
+        "OBS Studio"
+      ]
+    });
+  }
+
+  const cmd = `powershell -NoProfile -Command "Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -and $_.MainWindowTitle -notmatch '^(Microsoft Text Input Application|Program Manager|Settings|Ayarlar|Cortana|Host Process|NVIDIA|Intel|AMD|System Settings|Windows Shell Experience Host|Start|Taskbar|Başlat)$' -and $_.ProcessName -notmatch '^(TextInputHost|SystemSettings|ShellExperienceHost|SearchHost|StartMenuExperienceHost)$' } | Select-Object MainWindowTitle | ForEach-Object { $_.MainWindowTitle.Trim() } | Where-Object { $_ -ne '' }"`;
+  
+  exec(cmd, (error, stdout) => {
+    if (error) {
+      console.error('[WindowList] Error listing windows:', error);
+      return res.status(500).json({ error: 'Pencereler listelenirken hata oluştu.' });
+    }
+    
+    const lines = stdout
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+    
+    // De-duplicate
+    const uniqueWindows = Array.from(new Set(lines));
+    res.json({
+      success: true,
+      platform: 'win32',
+      windows: uniqueWindows
+    });
+  });
+});
+
 // Videos Endpoint
 app.get('/api/videos', (req, res) => {
   // Merge metadata list with any stray files actually in upload directory
@@ -1629,7 +1694,7 @@ app.get('/api/schedules', (req, res) => {
 
 // Create Schedule
 app.post('/api/schedules', (req, res) => {
-  const { channelId, title, videoType, videoSource, videoTitle, scheduledTime, scheduledEndTime, streamKey, streamProtocol, loop, shortsMode, dualStream, proxyUrl, youtubeLiveUrl } = req.body;
+  const { channelId, title, videoType, videoSource, videoTitle, scheduledTime, scheduledEndTime, streamKey, streamProtocol, loop, shortsMode, dualStream, proxyUrl, youtubeLiveUrl, geminiBotEnabled, geminiBotPrompt, geminiBotTtsEnabled } = req.body;
 
   if (!title || !videoSource || !scheduledTime || !streamKey) {
     return res.status(400).json({ error: 'Gerekli alanlar eksik.' });
@@ -1653,7 +1718,10 @@ app.post('/api/schedules', (req, res) => {
     proxyUrl: proxyUrl || undefined,
     youtubeLiveUrl: youtubeLiveUrl || undefined,
     status: 'Bekliyor',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    geminiBotEnabled: !!geminiBotEnabled,
+    geminiBotPrompt: geminiBotPrompt || '',
+    geminiBotTtsEnabled: !!geminiBotTtsEnabled
   };
 
   schedules.push(newSchedule);
@@ -1665,7 +1733,7 @@ app.post('/api/schedules', (req, res) => {
 // Update Schedule
 app.put('/api/schedules/:id', (req, res) => {
   const { id } = req.params;
-  const { channelId, title, scheduledTime, scheduledEndTime, streamKey, streamProtocol, loop, shortsMode, dualStream, proxyUrl, youtubeLiveUrl } = req.body;
+  const { channelId, title, scheduledTime, scheduledEndTime, streamKey, streamProtocol, loop, shortsMode, dualStream, proxyUrl, youtubeLiveUrl, geminiBotEnabled, geminiBotPrompt, geminiBotTtsEnabled } = req.body;
 
   const schedules = readSchedules();
   const index = schedules.findIndex(s => s.id === id);
@@ -1687,6 +1755,9 @@ app.put('/api/schedules/:id', (req, res) => {
   if (dualStream !== undefined) s.dualStream = !!dualStream;
   if (proxyUrl !== undefined) s.proxyUrl = proxyUrl;
   if (youtubeLiveUrl !== undefined) s.youtubeLiveUrl = youtubeLiveUrl;
+  if (geminiBotEnabled !== undefined) s.geminiBotEnabled = !!geminiBotEnabled;
+  if (geminiBotPrompt !== undefined) s.geminiBotPrompt = geminiBotPrompt;
+  if (geminiBotTtsEnabled !== undefined) s.geminiBotTtsEnabled = !!geminiBotTtsEnabled;
 
   writeSchedules(schedules);
   res.json(s);
@@ -1815,6 +1886,194 @@ app.get('/api/schedules/:id/logs', (req, res) => {
     logs = 'Henüz log kaydı oluşmadı veya yayın başlatılmadı.';
   }
   res.json({ logs });
+});
+
+// -------------------------------------------------------------
+// DYNAMIC MULTI-CHANNEL GEMINI AI CHAT BOT SYSTEM
+// -------------------------------------------------------------
+
+interface BotReply {
+  id: string;
+  author: string;
+  userMessage: string;
+  botResponse: string;
+  timestamp: number;
+  ttsSpoken: boolean;
+}
+
+// Memory database of AI bot replies and processed live message IDs
+const scheduleBotReplies = new Map<string, BotReply[]>();
+const processedChatMessagesGlobal = new Map<string, Set<string>>();
+
+// Helper function to call backend Gemini model for stream interaction
+async function generateGeminiChatResponse(userMessage: string, author: string, botPersonality: string): Promise<string> {
+  const hasKey = process.env.GEMINI_API_KEY && 
+                 process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY' && 
+                 process.env.GEMINI_API_KEY.trim() !== '';
+  if (!hasKey) {
+    return `Selam ${author}! Ben yapay zeka moderatörüyüm! Gemini API Anahtarı eksik olduğu için sadece size el sallıyorum. İyi yayınlar! ❤️`;
+  }
+
+  try {
+    const aiInstance = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build'
+        }
+      }
+    });
+
+    const personality = botPersonality || "Şirin, cana yakın ve bilgili bir canlı yayın moderatörü.";
+    const prompt = `Canlı yayınımızda, bir izleyici sohbete bir yorum yazdı. Lütfen ona, kanalın sahibi veya canlı yayının moderatörü olarak akıllıca, cana yakın, kısa ve çok samimi bir Türkçe yanıt ver.
+Moderatör Kişiliği/Sistem Talimatı: ${personality}
+İzleyicinin Adı: ${author}
+İzleyicinin Mesajı: "${userMessage}"
+
+Kurallar:
+1. Yanıtın son derece doğal olsun ve tek bir kısa paragraftan oluşsun (Maksimum 200 karakter).
+2. Yanıtın içinde teknik semboller, emoji kalabalığı, kod blokları veya yapay etiketler kullanma.
+3. Sadece doğrudan söylenecek yanıtı geri dön.`;
+
+    const chatRes = await aiInstance.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        temperature: 0.85
+      }
+    });
+
+    let result = chatRes.text?.trim() || "";
+    result = result.replace(/^["'«“`]+|["'»”`]+$/g, '');
+    return result;
+  } catch (err: any) {
+    console.error('[GeminiChatBot] Error calling Gemini API:', err.message);
+    return `Selam ${author}! Çok teşekkürler, yayına katıldığın için minnettarım! ❤️`;
+  }
+}
+
+// Background poller task for parsing chats from all active streams and generating AI replies (every 8 seconds)
+setInterval(async () => {
+  try {
+    const schedules = readSchedules();
+    const activeRunningSchedules = schedules.filter(s => s.status === 'Yayında' && s.youtubeLiveUrl);
+
+    for (const sched of activeRunningSchedules) {
+      if (!sched.geminiBotEnabled) continue;
+
+      const videoId = extractVideoIdHelper(sched.youtubeLiveUrl || '');
+      if (!videoId || videoId.length < 5) continue;
+
+      if (!processedChatMessagesGlobal.has(sched.id)) {
+        processedChatMessagesGlobal.set(sched.id, new Set());
+      }
+      const processedSet = processedChatMessagesGlobal.get(sched.id)!;
+
+      // Scrape YouTube Live Chat
+      const currentChatItems = await fetchYouTubeLiveChat(videoId);
+      if (currentChatItems.length === 0) continue;
+
+      // If processedSet is brand new (empty), seed it with existing items instead of back-answering old chats all at once
+      const isFirstPollForStream = processedSet.size === 0;
+
+      if (isFirstPollForStream) {
+        console.log(`[GeminiChatBot] First chat poll for stream "${sched.title}". Seeding ${currentChatItems.length} existing chat items...`);
+        currentChatItems.forEach(item => processedSet.add(item.id));
+        continue;
+      }
+
+      // Identify newly written comments in the live chat
+      const newMessages = currentChatItems.filter(item => !processedSet.has(item.id));
+
+      if (newMessages.length > 0) {
+        console.log(`[GeminiChatBot] Found ${newMessages.length} new messages for Stream "${sched.title}" (Kanal ID: ${sched.channelId || 'kanal1'})`);
+        
+        // Stiff safety count limit to avoid API hammering if multiple messages suddenly pool
+        const batchLimit = newMessages.slice(-3);
+
+        for (const msg of batchLimit) {
+          processedSet.add(msg.id); // mark processed immediately
+          
+          const userMsgText = msg.message;
+          const authorName = msg.author;
+
+          console.log(`[GeminiChatBot] Auto-answering ${authorName}: "${userMsgText}" on Stream "${sched.title}"`);
+          const botResponse = await generateGeminiChatResponse(userMsgText, authorName, sched.geminiBotPrompt || '');
+
+          if (!scheduleBotReplies.has(sched.id)) {
+            scheduleBotReplies.set(sched.id, []);
+          }
+          const repliesList = scheduleBotReplies.get(sched.id)!;
+          
+          repliesList.push({
+            id: msg.id + '_' + Date.now().toString(),
+            author: authorName,
+            userMessage: userMsgText,
+            botResponse,
+            timestamp: Date.now(),
+            ttsSpoken: false
+          });
+
+          // Cap max list size
+          if (repliesList.length > 100) {
+            scheduleBotReplies.set(sched.id, repliesList.slice(-80));
+          }
+        }
+
+        // Add remaining un-replied ones as processed so they don't loop
+        newMessages.forEach(msg => processedSet.add(msg.id));
+      }
+    }
+  } catch (err: any) {
+    console.error('[GeminiChatBot] Background worker polling error:', err.message);
+  }
+}, 8000);
+
+// Retrieve all generated AI replies for a schedule
+app.get('/api/schedules/:id/bot-replies', (req, res) => {
+  const { id } = req.params;
+  const replies = scheduleBotReplies.get(id) || [];
+  res.json({ success: true, replies });
+});
+
+// Mark a reply's TTS as spoken so it doesn't get spoken again on stream client
+app.post('/api/schedules/:id/bot-replies/:replyId/speak', (req, res) => {
+  const { id, replyId } = req.params;
+  const replies = scheduleBotReplies.get(id) || [];
+  const found = replies.find(r => r.id === replyId);
+  if (found) {
+    found.ttsSpoken = true;
+    res.json({ success: true });
+  } else {
+    res.status(404).json({ error: 'Ses kaydı bulunamadı.' });
+  }
+});
+
+// Generate manual bot response for sandbox testing
+app.post('/api/schedules/:id/bot-replies/generate-manual', async (req, res) => {
+  const { id } = req.params;
+  const { author, message, botPersonality } = req.body;
+  if (!author || !message) {
+    return res.status(400).json({ error: 'Yazar adı ve mesaj zorunludur.' });
+  }
+
+  const botResponse = await generateGeminiChatResponse(message, author, botPersonality || '');
+  
+  if (!scheduleBotReplies.has(id)) {
+    scheduleBotReplies.set(id, []);
+  }
+  const repliesList = scheduleBotReplies.get(id)!;
+  const newReply = {
+    id: 'manual_' + Date.now() + '_' + Math.round(Math.random() * 100000),
+    author,
+    userMessage: message,
+    botResponse,
+    timestamp: Date.now(),
+    ttsSpoken: false
+  };
+
+  repliesList.push(newReply);
+  res.json({ success: true, reply: newReply });
 });
 
 // Setup Dev/Prod Assets Servicing
