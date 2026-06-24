@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
+import https from 'https';
 import { spawn, exec, execSync, ChildProcess } from 'child_process';
 import multer from 'multer';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
@@ -1260,6 +1261,38 @@ app.post('/api/install-audio-cable', (req, res) => {
       error: err.message
     });
   }
+});
+
+// Proxy endpoint to download the VB-Cable ZIP from vb-audio safely bypassing any browser sandboxing / direct download restrictions
+app.get('/api/download-cable-zip', (req, res) => {
+  const fileUrl = "https://download.vb-audio.com/Download_CH/VBCABLE_Driver_Pack43.zip";
+  
+  res.setHeader('Content-Disposition', 'attachment; filename=VBCABLE_Driver_Pack43.zip');
+  res.setHeader('Content-Type', 'application/zip');
+
+  const request = https.get(fileUrl, (response) => {
+    if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+      // Handle redirect if any
+      https.get(response.headers.location, (redirectResponse) => {
+        redirectResponse.pipe(res);
+      }).on('error', (err) => {
+        console.error('Error in redirected download of audio cable zip:', err);
+        res.status(500).send('Dosya indirilemedi (Bağlantı hatası).');
+      });
+      return;
+    }
+
+    if (response.statusCode !== 200) {
+      console.error(`Failed to download audio cable zip: Status ${response.statusCode}`);
+      return res.status(500).send('Sanal Ses Kablosu indirilirken sunucu hatası oluştu. Lütfen daha sonra tekrar deneyin.');
+    }
+    response.pipe(res);
+  });
+
+  request.on('error', (err) => {
+    console.error('Error proxying audio cable zip:', err);
+    res.status(500).send('Sürücü indirilirken bağlantı hatası oluştu.');
+  });
 });
 
 // Videos Endpoint

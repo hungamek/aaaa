@@ -2287,10 +2287,10 @@ export default function App() {
                                   </p>
                                   <div className="flex gap-1.5 my-1">
                                     <a
-                                      href="https://download.vb-audio.com/Download_CH/VBCABLE_Driver_Pack43.zip"
+                                      href="/api/download-cable-zip"
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1 bg-zinc-800 hover:bg-zinc-750 text-emerald-400 px-2 py-1 rounded text-[8.5px] font-bold uppercase border border-zinc-700"
+                                      className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-black px-3 py-1.5 rounded text-[9px] font-bold uppercase"
                                     >
                                       📥 Direkt ZIP Dosyasını İndir
                                     </a>
