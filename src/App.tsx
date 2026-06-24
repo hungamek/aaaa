@@ -2259,23 +2259,50 @@ export default function App() {
                                 </p>
                               </div>
                             ) : (
-                              <button
-                                type="button"
-                                disabled={isInstallingCable}
-                                onClick={handleInstallAudioCable}
-                                className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-500 rounded text-[10px] font-black uppercase tracking-wider text-black flex items-center justify-center gap-1.5 transition active:scale-[0.98]"
-                              >
-                                {isInstallingCable ? (
-                                  <>
-                                    <RefreshCw size={11} className="animate-spin text-zinc-500" />
-                                    <span>Kablonun Kurulumu Başlatılıyor...</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span>🔌 VB-Cable Sanal Ses Kablosunu Otomatik Kur</span>
-                                  </>
-                                )}
-                              </button>
+                              <div className="space-y-2">
+                                <button
+                                  type="button"
+                                  disabled={isInstallingCable}
+                                  onClick={handleInstallAudioCable}
+                                  className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-500 rounded text-[10px] font-black uppercase tracking-wider text-black flex items-center justify-center gap-1.5 transition active:scale-[0.98]"
+                                >
+                                  {isInstallingCable ? (
+                                    <>
+                                      <RefreshCw size={11} className="animate-spin text-zinc-500" />
+                                      <span>Kablonun Kurulumu Başlatılıyor...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span>🔌 VB-Cable Sanal Ses Kablosunu Otomatik Kur</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                <div className="bg-zinc-950 border border-zinc-800 p-2.5 rounded text-[9px] text-zinc-400 normal-case space-y-1.5 font-medium leading-relaxed">
+                                  <p className="text-zinc-300 font-bold uppercase tracking-wider">
+                                    ❌ Windows Kurulum Ekranı (UAC) Açılmadı mı?
+                                  </p>
+                                  <p>
+                                    Windows, güvenlik nedeniyle arka plan uygulamalarının doğrudan kurulum penceresi açmasını engelleyebilir. Hiç dert etmeyin, <strong className="text-emerald-400">el ile saniyeler içinde kurabilirsiniz</strong>:
+                                  </p>
+                                  <div className="flex gap-1.5 my-1">
+                                    <a
+                                      href="https://download.vb-audio.com/Download_CH/VBCABLE_Driver_Pack43.zip"
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 bg-zinc-800 hover:bg-zinc-750 text-emerald-400 px-2 py-1 rounded text-[8.5px] font-bold uppercase border border-zinc-700"
+                                    >
+                                      📥 Direkt ZIP Dosyasını İndir
+                                    </a>
+                                  </div>
+                                  <ol className="list-decimal list-inside text-[8.5px] space-y-1 text-zinc-500">
+                                    <li>Yukarıdaki butondan ZIP dosyasını bilgisayarınıza indirin.</li>
+                                    <li>ZIP dosyasını sağ tıklayıp <strong className="text-zinc-300">Klasöre Ayıkla (Extract)</strong> yapın.</li>
+                                    <li>Klasörün içindeki <strong className="text-zinc-300">VBCABLE_Setup_x64.exe</strong> dosyasını sağ tıklayıp <strong className="text-zinc-300">"Yönetici Olarak Çalıştır"</strong> deyin.</li>
+                                    <li>Açılan pencerede sağ alttaki <strong className="text-emerald-400">"Install Driver"</strong> (Sürücüyü Yükle) butonuna basın ve bilgisayarınızı yeniden başlatın. Bu kadar!</li>
+                                  </ol>
+                                </div>
+                              </div>
                             )}
 
                             {cableInstallStatus.message && (
