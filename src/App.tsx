@@ -2218,21 +2218,27 @@ export default function App() {
                       </div>
 
                       {windowAudioMode === 'system' && (
-                        <p className="text-[9.5px] text-zinc-400 normal-case leading-relaxed">
-                          Sisteminizdeki tüm sesleri (Discord, YouTube, oyun sesleri vb.) doğrudan mikrofona/yayına loopback olarak verir.
-                        </p>
+                        <div className="bg-blue-950/20 border border-blue-900/30 p-2.5 rounded text-[9.5px] text-zinc-400 space-y-1 leading-relaxed">
+                          <strong className="text-blue-400 block mb-0.5 font-bold uppercase tracking-wider">🌟 SIFIR AYAR - EN BASİT MOD (ÖNERİLEN!)</strong>
+                          <p className="normal-case">
+                            Hiçbir sanal kablo veya ses ayarıyla uğraşmak istemiyorsanız <strong className="text-white">bu modu seçin</strong>. Bilgisayarınızda o an çalan oyun sesi dahil tüm sesleri sıfır konfigürasyonla doğrudan yayına verir.
+                          </p>
+                          <p className="normal-case text-[9px] text-zinc-500 font-medium">
+                            👉 <strong className="text-blue-400">Not:</strong> Arka planda Discord konuşmaları veya YouTube müzikleri de varsa onlar da yayına gider.
+                          </p>
+                        </div>
                       )}
 
                       {windowAudioMode === 'cable' && (
                         <div className="bg-emerald-950/20 border border-emerald-900/30 p-2.5 rounded text-[9.5px] text-zinc-400 space-y-2.5 leading-relaxed">
-                          <strong className="text-emerald-400 block mb-0.5 font-bold uppercase tracking-wider">🔒 YALNIZCA OYUN SESİ İZOLASYONU (ÖNERİLEN!)</strong>
+                          <strong className="text-emerald-400 block mb-0.5 font-bold uppercase tracking-wider">🔌 SADECE OYUN SESİ İZOLASYONU</strong>
                           <p className="normal-case">
-                            Sadece oyunun/uygulamanın sesini yayına vermek ve bilgisayarınızdaki diğer sesleri (Discord, bildirimler) gizlemek için en profesyonel yöntem:
+                            Discord veya tarayıcı sesleriniz yayına gitmesin, <strong className="text-white">sadece oyunun kendi sesi</strong> gitsin istiyorsanız bu gelişmiş yöntemi kullanabilirsiniz:
                           </p>
                           <ol className="list-decimal list-inside normal-case space-y-0.5 text-zinc-300">
-                            <li><strong className="text-white">VB-Audio Virtual Cable</strong> yazılımını bilgisayarınıza kurun.</li>
-                            <li>Windows Ses Ayarlarından oyunun (örn: GTA V) çıkışını <strong className="text-white">CABLE Input</strong> yapın.</li>
-                            <li>Bu mod, oyun sesini <strong className="text-white">CABLE Output</strong> üzerinden yakalayarak yayına kesintisiz aktarır.</li>
+                            <li>Aşağıdaki <strong className="text-white">Otomatik Kur</strong> butonuyla sanal ses kablosunu kurun.</li>
+                            <li>Windows ses karıştırıcısından (veya oyun ayarlarından) oyunun çıkış aygıtını <strong className="text-white">CABLE Input</strong> yapın.</li>
+                            <li>Böylece oyun sesi diğer tüm seslerden ayrışır ve yayına tertemiz gider.</li>
                           </ol>
 
                           <div className="pt-2 border-t border-emerald-900/40 space-y-2">
@@ -2240,23 +2246,37 @@ export default function App() {
                               💡 <strong className="text-emerald-400">Tek Tıkla Kolay Kurulum:</strong> Bilgisayarınıza sanal ses kablosunu otomatik indirmek ve kurmak için aşağıdaki sihirbazı çalıştırabilirsiniz:
                             </p>
                             
-                            <button
-                              type="button"
-                              disabled={isInstallingCable}
-                              onClick={handleInstallAudioCable}
-                              className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-500 rounded text-[10px] font-black uppercase tracking-wider text-black flex items-center justify-center gap-1.5 transition active:scale-[0.98]"
-                            >
-                              {isInstallingCable ? (
-                                <>
-                                  <RefreshCw size={11} className="animate-spin text-zinc-500" />
-                                  <span>Kablonun Kurulumu Başlatılıyor...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <span>🔌 VB-Cable Sanal Ses Kablosunu Otomatik Kur</span>
-                                </>
-                              )}
-                            </button>
+                            {(window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') ? (
+                              <div className="bg-amber-950/25 border border-amber-800/40 p-2.5 rounded text-[9px] text-amber-300 normal-case space-y-1.5 font-medium leading-relaxed">
+                                <p className="font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                                  <AlertCircle size={11} className="text-amber-400" /> BULUT ÖNİZLEME MODU (Windows UAC İzni Neden Açılmadı?)
+                                </p>
+                                <p>
+                                  Şu an bu uygulamayı <strong className="text-white">Google Bulut Sunucusunda (AI Studio Tarayıcı Önizlemesinde)</strong> çalıştırmaktesiniz. Bulut sunucusu uzaktan sizin kişisel bilgisayarınıza doğrudan program kuramaz, bu yüzden Windows İzin Penceresi (UAC) ekranınızda beliremez.
+                                </p>
+                                <p>
+                                  <strong className="text-emerald-400">Çözüm:</strong> Bu otomatik kurulum butonunun ve pencerelerinizin/seslerinizin tam çalışması için, projeyi sağ üst köşedeki ayarlardan <strong className="text-white">ZIP veya GitHub</strong> ile bilgisayarınıza indirip kendi bilgisayarınızda (<strong className="text-white">localhost</strong> üzerinde) başlatmalısınız. Yerelde başlattığınızda bu buton bilgisayarınızdaki Windows UAC onay ekranını anında açacaktır!
+                                </p>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={isInstallingCable}
+                                onClick={handleInstallAudioCable}
+                                className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-500 rounded text-[10px] font-black uppercase tracking-wider text-black flex items-center justify-center gap-1.5 transition active:scale-[0.98]"
+                              >
+                                {isInstallingCable ? (
+                                  <>
+                                    <RefreshCw size={11} className="animate-spin text-zinc-500" />
+                                    <span>Kablonun Kurulumu Başlatılıyor...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>🔌 VB-Cable Sanal Ses Kablosunu Otomatik Kur</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
 
                             {cableInstallStatus.message && (
                               <div className={`p-2 rounded text-[9px] leading-relaxed border flex items-start gap-1.5 ${
