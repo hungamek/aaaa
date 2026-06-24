@@ -626,18 +626,26 @@ function startStreamProcess(schedule: Schedule, isLoopRestart = false) {
       const index = schedules.findIndex(s => s.id === schedule.id);
       if (index !== -1) {
         const s = schedules[index];
+        const isErrorCrash = code !== 0 && code !== null;
         
+        let diagnosticMsg = '';
+        if (isErrorCrash && s.videoType === 'window') {
+          diagnosticMsg = `\n[PENCERE/EKRAN YAYINI TEŞHİS DETAYI]:\n` +
+            `- BULUT SUNUCUSU ENGELİ: Eğer bu yayını şu an açık olan Google AI Studio tarayıcı arayüzünden ("Start/Başlat" butonuna basarak) başlattıysanız, Google Cloud bulut sunucusunda fiziksel ekran kartı ve ses kartı bulunmadığı için pencereleriniz/oyunlarınız algılanamaz ve FFmpeg anında Hata Kodu 4294967291 (-5 I/O Hatası) ile kapanır.\n` +
+            `- ÇÖZÜM: Gerçek oyun/ekran ve ses pencerelerinizi yayına vermek için bu projeyi ZIP veya GitHub ile bilgisayarınıza indirip LOCAL (Localhost) olarak çalıştırmanız gerekir.\n` +
+            `- SES GİRİŞ CİHAZI HATASI: Eğer lokalde çalıştırıyorsanız ve Ses Yakalama Modu'nu "Oyun Sesi (VB-Cable)" seçtiyseniz ama bilgisayarınızda "VB-Audio Virtual Cable" yazılımı kurulu değilse veya adı tam uyuşmuyorsa FFmpeg ses cihazını açamaz. Çözüm için ses yakalama modunu "Sessiz" veya "Tüm Sistem Sesi" yapıp tekrar deneyebilirsiniz.\n`;
+        }
+
         // Loop restart check: If loop is enabled and status is still Live (not stopped manually)
         if (s.status === 'Yayında' && s.loop) {
-          const isErrorCrash = code !== 0 && code !== null;
           const isRapidCrash = isErrorCrash && elapsedSec < 15;
 
           if (isRapidCrash) {
             console.log(`Rapid crash protection triggered. Stream ${schedule.id} exited in ${elapsedSec.toFixed(1)}s with code ${code}.`);
-            appendLog(schedule.id, `\n[HATA ENGELLEME] Yayın başladıktan hemen sonra kapandı (${elapsedSec.toFixed(1)} saniye, Çıkış Kodu: ${code}).\nSonsuz döngüyü engellemek için otomatik yeniden başlatma iptal edildi.\nLütfen Yayın Anahtarını (Stream Key), video dosyasını ve SOCKS5 proxy ayarlarınızı kontrol edin!\n`);
+            appendLog(schedule.id, `\n[HATA ENGELLEME] Yayın başladıktan hemen sonra kapandı (${elapsedSec.toFixed(1)} saniye, Çıkış Kodu: ${code}).\nSonsuz döngüyü engellemek için otomatik yeniden başlatma iptal edildi.\n${diagnosticMsg}\nLütfen Yayın Anahtarını (Stream Key), video dosyasını ve SOCKS5 proxy ayarlarınızı kontrol edin!\n`);
             
             s.status = 'Hata';
-            s.errorMsg = `Yayın başladıktan hemen sonra kapandı (${elapsedSec.toFixed(1)}s, Hata Kodu: ${code})`;
+            s.errorMsg = `Yayın anında kapandı (${elapsedSec.toFixed(1)}s, Kod: ${code}). ${s.videoType === 'window' ? 'Pencere veya ses aygıtı hatası.' : ''}`;
             s.actualEndTime = new Date().toISOString();
             writeSchedules(schedules);
             return;
@@ -686,7 +694,10 @@ function startStreamProcess(schedule: Schedule, isLoopRestart = false) {
         if (s.status === 'Yayında') {
           s.status = code === 0 || code === null ? 'Tamamlandı' : 'Hata';
           if (code !== 0 && code !== null) {
-            s.errorMsg = `Yayın beklenmedik hata ile durduruldu. Çıkış kodu: ${code}, Sinyal: ${signal}`;
+            s.errorMsg = `Yayın beklenmedik hata ile durduruldu. Çıkış kodu: ${code}. ${s.videoType === 'window' ? 'Pencere veya ses aygıtı bulunamadı.' : ''}`;
+            if (diagnosticMsg) {
+              appendLog(schedule.id, diagnosticMsg);
+            }
           }
           s.actualEndTime = new Date().toISOString();
           writeSchedules(schedules);
@@ -1183,6 +1194,72 @@ app.get('/api/windows', (req, res) => {
       windows: uniqueWindows
     });
   });
+});
+
+// Windows VB-Cable Auto Installer Endpoint
+app.post('/api/install-audio-cable', (req, res) => {
+  if (process.platform !== 'win32') {
+    return res.status(400).json({
+      success: false,
+      message: 'Sanal Ses Kablosu kurulumu sadece Windows işletim sistemlerinde (Localhost) desteklenmektedir. Bulut sunucusunda kurulamaz.'
+    });
+  }
+
+  // PowerShell script to download, extract and run VB-Cable installer with admin rights (UAC prompt)
+  const psCommand = `
+    $Url = "https://download.vb-audio.com/Download_CH/VBCABLE_Driver_Pack43.zip"
+    $ZipFile = "$env:TEMP\\VBCABLE_Driver_Pack43.zip"
+    $ExtractPath = "$env:TEMP\\VBCABLE_Driver"
+
+    If (!(Test-Path $ExtractPath)) { New-Item -ItemType Directory -Path $ExtractPath | Out-Null }
+    
+    Write-Host "Downloading VB-Cable..."
+    Invoke-WebRequest -Uri $Url -OutFile $ZipFile
+    
+    Write-Host "Extracting ZIP..."
+    Expand-Archive -Path $ZipFile -DestinationPath $ExtractPath -Force
+    
+    If ([Environment]::Is64BitOperatingSystem) {
+        $Installer = "$ExtractPath\\VBCABLE_Setup_x64.exe"
+    } Else {
+        $Installer = "$ExtractPath\\VBCABLE_Setup.exe"
+    }
+    
+    Write-Host "Launching installer as Administrator..."
+    Start-Process -FilePath $Installer -ArgumentList "-i" -Verb RunAs -Wait
+  `;
+
+  const tempScriptPath = path.join(process.cwd(), 'temp-install-cable.ps1');
+  try {
+    fs.writeFileSync(tempScriptPath, psCommand, 'utf8');
+
+    const cmd = `powershell -NoProfile -ExecutionPolicy Bypass -File "${tempScriptPath}"`;
+    exec(cmd, (error, stdout, stderr) => {
+      // Clean up the script
+      try { fs.unlinkSync(tempScriptPath); } catch (e) {}
+
+      if (error) {
+        console.error('[AudioCableInstall] Error running installer script:', error);
+        return res.status(500).json({
+          success: false,
+          message: 'Sanal ses kablosu kurucu başlatılırken bir hata oluştu. Lütfen yönetici izinlerini (UAC) onayladığınızdan emin olun.',
+          error: error.message
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'VB-Cable kurucu başarıyla başlatıldı! Lütfen bilgisayarınızın ekranında açılan Windows yönetici izni (UAC) onay penceresini onaylayın ve açılan kurulum sihirbazında "Install Driver" butonuna tıklayın.'
+      });
+    });
+  } catch (err: any) {
+    try { fs.unlinkSync(tempScriptPath); } catch (e) {}
+    res.status(500).json({
+      success: false,
+      message: 'Kurulum dosyaları hazırlanırken bir hata oluştu.',
+      error: err.message
+    });
+  }
 });
 
 // Videos Endpoint

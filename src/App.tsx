@@ -657,6 +657,37 @@ export default function App() {
   const [isLoadingWindows, setIsLoadingWindows] = useState(false);
   const [windowAudioMode, setWindowAudioMode] = useState<'silent' | 'system' | 'cable' | 'custom'>('silent');
   const [windowAudioDevice, setWindowAudioDevice] = useState('CABLE Output (VB-Audio Virtual Cable)');
+  const [isInstallingCable, setIsInstallingCable] = useState(false);
+  const [cableInstallStatus, setCableInstallStatus] = useState<{ type: 'success' | 'error' | ''; message: string }>({ type: '', message: '' });
+
+  const handleInstallAudioCable = async () => {
+    setIsInstallingCable(true);
+    setCableInstallStatus({ type: '', message: '' });
+    try {
+      const res = await fetch('/api/install-audio-cable', {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCableInstallStatus({
+          type: 'success',
+          message: data.message
+        });
+      } else {
+        setCableInstallStatus({
+          type: 'error',
+          message: data.message || 'Sanal ses kablosu kurulumu başlatılamadı.'
+        });
+      }
+    } catch (err: any) {
+      setCableInstallStatus({
+        type: 'error',
+        message: 'Sunucuyla bağlantı kurulamadı veya bu özellik bulut sunucularında desteklenmiyor.'
+      });
+    } finally {
+      setIsInstallingCable(false);
+    }
+  };
 
   const fetchWindows = async () => {
     setIsLoadingWindows(true);
@@ -2193,7 +2224,7 @@ export default function App() {
                       )}
 
                       {windowAudioMode === 'cable' && (
-                        <div className="bg-emerald-950/20 border border-emerald-900/30 p-2.5 rounded text-[9.5px] text-zinc-400 space-y-1 leading-relaxed">
+                        <div className="bg-emerald-950/20 border border-emerald-900/30 p-2.5 rounded text-[9.5px] text-zinc-400 space-y-2.5 leading-relaxed">
                           <strong className="text-emerald-400 block mb-0.5 font-bold uppercase tracking-wider">🔒 YALNIZCA OYUN SESİ İZOLASYONU (ÖNERİLEN!)</strong>
                           <p className="normal-case">
                             Sadece oyunun/uygulamanın sesini yayına vermek ve bilgisayarınızdaki diğer sesleri (Discord, bildirimler) gizlemek için en profesyonel yöntem:
@@ -2203,6 +2234,45 @@ export default function App() {
                             <li>Windows Ses Ayarlarından oyunun (örn: GTA V) çıkışını <strong className="text-white">CABLE Input</strong> yapın.</li>
                             <li>Bu mod, oyun sesini <strong className="text-white">CABLE Output</strong> üzerinden yakalayarak yayına kesintisiz aktarır.</li>
                           </ol>
+
+                          <div className="pt-2 border-t border-emerald-900/40 space-y-2">
+                            <p className="normal-case text-[9px] text-zinc-400 font-medium">
+                              💡 <strong className="text-emerald-400">Tek Tıkla Kolay Kurulum:</strong> Bilgisayarınıza sanal ses kablosunu otomatik indirmek ve kurmak için aşağıdaki sihirbazı çalıştırabilirsiniz:
+                            </p>
+                            
+                            <button
+                              type="button"
+                              disabled={isInstallingCable}
+                              onClick={handleInstallAudioCable}
+                              className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-500 rounded text-[10px] font-black uppercase tracking-wider text-black flex items-center justify-center gap-1.5 transition active:scale-[0.98]"
+                            >
+                              {isInstallingCable ? (
+                                <>
+                                  <RefreshCw size={11} className="animate-spin text-zinc-500" />
+                                  <span>Kablonun Kurulumu Başlatılıyor...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span>🔌 VB-Cable Sanal Ses Kablosunu Otomatik Kur</span>
+                                </>
+                              )}
+                            </button>
+
+                            {cableInstallStatus.message && (
+                              <div className={`p-2 rounded text-[9px] leading-relaxed border flex items-start gap-1.5 ${
+                                cableInstallStatus.type === 'success'
+                                  ? 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300'
+                                  : 'bg-rose-950/30 border-rose-900/40 text-rose-300'
+                              }`}>
+                                {cableInstallStatus.type === 'success' ? (
+                                  <CheckCircle2 size={12} className="shrink-0 mt-0.5" />
+                                ) : (
+                                  <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                                )}
+                                <span className="normal-case font-medium">{cableInstallStatus.message}</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
 
